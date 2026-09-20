@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: crypto-leverage-arbitrage-algorithm
+    name: cryptomarketcap-arb
     runtime: node
     plan: free
     buildCommand: npm install && npm run build

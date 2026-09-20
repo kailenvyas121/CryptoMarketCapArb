@@ -1,15 +1,17 @@
-# Crypto Leverage Arbitrage Algorithm
+# CryptoMarketCapArb
 
-[![CI](https://github.com/kailenvyas121/crypto-leverage-arbitrage/actions/workflows/ci.yml/badge.svg)](https://github.com/kailenvyas121/crypto-leverage-arbitrage/actions/workflows/ci.yml)
+[![CI](https://github.com/kailenvyas121/CryptoMarketCapArb/actions/workflows/ci.yml/badge.svg)](https://github.com/kailenvyas121/CryptoMarketCapArb/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Live dashboard that segments the crypto market into six market-cap tiers, models **lagged price propagation from BTC/ETH into lower tiers**, and scores **long/short perpetual-futures setups** with a risk score plus explicit entry, exit, and stop-loss levels.
+Live dashboard that segments the crypto market into six market-cap tiers, models **lagged price propagation from BTC/ETH into lower tiers**, and scores **long/short perpetual-futures setups** with a risk score plus explicit entry, exit, and stop-loss.
 
 ```bash
-npm install && npm run dev
+npm install && npm run verify-math && npm run dev
 ```
 
-runs immediately after clone. No API key is required — CoinGecko's public market endpoint is used by default, and the optional AI assistant falls back to a rule-based analyst if `GEMINI_API_KEY` isn't set. Open **http://localhost:5000** (macOS AirPlay often occupies 5000; if so, run `PORT=5050 npm run dev`).
+`verify-math` re-runs every identity in this README against `shared/propagation.ts` (the production math module) so the write-up cannot drift from the engine. No API key is required — CoinGecko's public market endpoint is the default, and the optional AI assistant falls back to a rule-based analyst if `GEMINI_API_KEY` isn't set.
+
+Open **http://localhost:5000**. macOS AirPlay often occupies 5000; if so, `PORT=5050 npm run dev`.
 
 > Educational / portfolio project, not financial advice. Signals are heuristic and generated from public 24h market data. Perpetual futures are highly leveraged — treat every number as a research output, not an order.
 
@@ -17,63 +19,221 @@ runs immediately after clone. No API key is required — CoinGecko's public mark
 
 Price discovery in crypto is not simultaneous. BTC and ETH move first. That momentum then cascades down through progressively smaller, less liquid tiers — SOL and other large caps next, then names like HYPE / ZEC, then the long tail — with a **delay** and a **decay in magnitude**.
 
-The gap between "the leaders already moved" and "this lower-tier token has fully absorbed that move" is the inefficiency this model is built to surface. In a retail-dominated regime that delay is long enough to be tradable on perps. As institutional participation compresses it, the same dashboard still tells you *whether the lag is still there* and how risky a catch-up trade would be.
+The tradable object is the residual: a token whose 24h return has not yet printed the move that BTC/ETH-led propagation implies for its tier. Long the underperformer, short the outperformer, size by risk, exit as the residual closes.
 
-## What it actually does today
+## Market-cap tiers
 
-| Claim | Implementation |
+| Tier | Market cap | Role in the cascade | Examples |
+|---|---|---|---|
+| Mega | $100B+ | Leaders. BTC / ETH *are* the signal, not the trade. | BTC, ETH |
+| Large | $10B–$100B | First followers. | SOL, BNB, XRP |
+| Large-Medium | $5B–$10B | Established names. | LINK, UNI |
+| Small-Medium | $1B–$5B | Second-tier liquid perps. | HYPE-class |
+| Small | $100M–$1B | Higher-beta catch-up names. | ZEC-class |
+| Micro | $10M–$100M | Long-tail / speculative. Highest lag, highest risk. | — |
+
+Assignment is deterministic in `cryptoService.determineMarketCapTier`.
+
+## Methodology
+
+All production formulas live in [`shared/propagation.ts`](shared/propagation.ts) and are consumed by [`server/services/opportunityService.ts`](server/services/opportunityService.ts). CI runs `npm run verify-math` on every push.
+
+### 1. Leader momentum
+
+Let \(r_i\) be token \(i\)'s CoinGecko 24h percent change. The leader signal is the equal-weight average of BTC and ETH (falls back to the mega-tier average if either is missing):
+
+\[
+L \;=\; \frac{r_{\mathrm{BTC}} + r_{\mathrm{ETH}}}{2}
+\]
+
+This is the impulse the rest of the market is expected to absorb.
+
+### 2. Cascade / propagation factor
+
+Each tier \(k\) has an adjacent-tier correlation \(\rho_k\) (static, historically typical 24h values — see [Known limitations](#known-limitations)):
+
+| Step | \(\rho_k\) |
 |---|---|
-| Segment tokens into six market-cap tiers | `server/services/cryptoService.ts` buckets every CoinGecko listing: Mega ($100B+), Large ($10B–$100B), Large-Medium ($5B–$10B), Small-Medium ($1B–$5B), Small ($100M–$1B), Micro ($10M–$100M). |
-| Model lagged propagation from BTC/ETH | `server/services/opportunityService.ts` takes live BTC/ETH 24h momentum, multiplies it through a decaying tier-correlation chain, and computes an *expected propagated move* for every other token. |
-| Spot laggards | Each token is scored on two independent gaps: (a) vs its own tier average, (b) vs the BTC/ETH-implied expected move (`lagGap`). Either gap can fire a signal; both agreeing raises confidence. |
-| Risk score + leverage | Volatility (by tier), volume/liquidity, correlation breakdown, and trend-alignment are averaged into a 0–100 risk score, which maps to a 2x–10x perp leverage band. |
-| Entry / exit / stop | Every signal ships a price-level entry, a catch-up profit target, and a volatility-scaled stop-loss, plus a plain-English explanation of *why*. |
-| Live dashboard | React UI streams CoinGecko-backed prices over WebSockets and renders the Signals tab with token, direction, lag gap, leader momentum, risk, leverage, and the trade plan. |
+| Mega | \(1\) (identity — the leaders *are* \(L\)) |
+| Large | \(0.94\) |
+| Large-Medium | \(0.87\) |
+| Small-Medium | \(0.72\) |
+| Small | \(0.58\) |
+| Micro | \(0.23\) |
 
-### Market-cap tiers
+The **cumulative propagation factor** \(\varphi(k)\) is the product of every step from Mega down to \(k\):
 
-| Tier | Market cap | Role in the cascade |
+\[
+\varphi(k) \;=\; \prod_{j=1}^{k} \rho_j
+\]
+
+which evaluates to:
+
+| Tier \(k\) | \(\varphi(k)\) |
+|---|---|
+| Mega | \(1.000000\) |
+| Large | \(0.940000\) |
+| Large-Medium | \(0.817800\) |
+| Small-Medium | \(0.588816\) |
+| Small | \(0.341513\) |
+| Micro | \(0.078548\) |
+
+So a +2% BTC/ETH day is expected to show up as ~+0.68% in the small-cap tier once the cascade has fully propagated, and only ~+0.16% in micro — not because micros "don't move", but because the *leader-correlated* component of their move is that small; the rest is idiosyncratic.
+
+### 3. Expected move and lag gap
+
+For token \(i\) in tier \(k\):
+
+\[
+\mathbb{E}[r_i \mid L, k] \;=\; L \cdot \varphi(k)
+\]
+
+\[
+g_i \;=\; \mathbb{E}[r_i \mid L, k] \;-\; r_i
+\]
+
+\(g_i\) is the **lag gap**.
+
+- \(g_i > 0\) \(\Rightarrow\) actual return is below the leader-implied expected return \(\Rightarrow\) **long** (underperformed the cascade; residual should close upward).
+- \(g_i < 0\) \(\Rightarrow\) actual return is above the expected return \(\Rightarrow\) **short**.
+
+Direction is `isLongSetup`: if \(|g_i| > 0.5\) use \(\mathrm{sign}(g_i)\); otherwise fall back to within-tier mean reversion (\(r_i < \bar{r}_k\) \(\Rightarrow\) long). The dashboard's `opportunityType`, strategy text, and entry price all share this function — they cannot disagree.
+
+### 4. When a signal fires
+
+Two independent triggers; either is enough:
+
+1. **Within-tier deviation.** Let \(\bar{r}_k\) be the equal-weight 24h mean of tier \(k\), and \(d_i = |r_i - \bar{r}_k|\). Fire if \(d_i > 2\).
+2. **Propagation laggard.** Fire if \(|L| > 0.5\) and
+
+\[
+|g_i| \;>\; \max\!\big(0.75,\; 0.4 \cdot |\mathbb{E}[r_i]|\big)
+\]
+
+i.e. the residual is large both in absolute terms and relative to the move the model expected.
+
+A signal is then kept only if confidence \(> 60\) (below).
+
+### 5. Risk score
+
+Four components, equal-weighted, each on \([0, 100]\):
+
+\[
+R_i \;=\; \frac{R^{\mathrm{vol}}_i + R^{\mathrm{corr}}_i + R^{\mathrm{liq}}_i + R^{\mathrm{trend}}_i}{4}
+\]
+
+| Component | Formula |
+|---|---|
+| Volatility \(R^{\mathrm{vol}}\) | Tier lookup: mega 15, large 25, large-medium 35, small-medium 45, small 55, micro 75. |
+| Correlation \(R^{\mathrm{corr}}\) | \(\min(100,\, 5 \cdot d_i)\) — larger within-tier deviation is treated as higher correlation-breakdown risk. |
+| Liquidity \(R^{\mathrm{liq}}\) | Let \(v = V_{24h} / \mathrm{mcap}\). \(v < 0.005 \Rightarrow 80\) (too thin); \(v > 0.5 \Rightarrow 70\) (manipulation-like turnover); otherwise \(\max(10,\, 50 - 200v)\). |
+| Trend \(R^{\mathrm{trend}}\) | \(\min(100,\, 3 \cdot |r_i - \bar{r}_{\mathrm{mkt}}|)\) — fighting the whole-universe average is more expensive. |
+
+Mapped to a label and a perp leverage band:
+
+| \(R_i\) | Label | Leverage |
 |---|---|---|
-| Mega | $100B+ | Leaders. BTC / ETH are the signal, not the trade. |
-| Large | $10B–$100B | First followers (SOL, BNB, XRP). |
-| Large-Medium | $5B–$10B | Established names (LINK, UNI). |
-| Small-Medium | $1B–$5B | Second-tier liquid perps (HYPE-class). |
-| Small | $100M–$1B | Higher-beta catch-up names (ZEC-class). |
-| Micro | $10M–$100M | Long-tail / speculative. Highest lag, highest risk. |
+| \(\le 30\) | low | 5–7x if \(R_i > 20\), else 8–10x |
+| \(\le 60\) | medium | 3–5x if \(R_i > 35\), else 5–7x |
+| \(> 60\) | high | 2–3x |
 
-## The core algorithm
+(The 20 / 35 / 50 cut-points are in `recommendLeverage`. Worked example below lands at \(R = 25\) → **low, 5–7x**.)
 
-`server/services/opportunityService.ts` is the engine. Condensed:
+### 6. Confidence
 
-```text
-leaderMomentum          = avg(24h % change of BTC, ETH)
-propagationFactor(tier) = product of historical adjacent-tier correlations
-                          from Mega down to this token's tier
-expectedMove(token)     = leaderMomentum × propagationFactor(token.tier)
-lagGap(token)           = expectedMove(token) − token.actual24hChange
+Two scaled magnitudes, then a penalty for risk:
 
-# large |lagGap| (and/or a large within-tier deviation) => laggard
-direction   = long  if lagGap > 0   # hasn't caught up to an up-move
-            = short if lagGap < 0   # hasn't caught down to a down-move
-confidence  = f(tierDeviation, lagGap, signal-agreement) − riskPenalty
-riskScore   = avg(volatilityRisk, correlationRisk, volumeRisk, trendRisk)
-leverage    = g(riskScore)          # 2–3x ... 8–10x
+\[
+\sigma(x, n) \;=\; \min\!\Big(5,\; \frac{|x|}{10}\sqrt{n}\Big)
+\]
+
+This is **not** a formal z-test. It is a sample-size-adjusted magnitude, capped at 5, so a 3% dislocation in a 200-name tier scores higher than the same dislocation in a 4-name tier. Do not read it as a p-value.
+
+\[
+C^{\mathrm{tier}} \;=\; 10\, d_i + 15\, \sigma(d_i, n_k)
+\]
+
+\[
+C^{\mathrm{lag}} \;=\; 8\, |g_i| + 15\, \ell_i, \qquad
+\ell_i \;=\; \min\!\Big(3,\; \frac{|g_i|}{|\mathbb{E}[r_i]|}\Big) \text{ if } |\mathbb{E}[r_i]| > 0.1 \text{ else } 0
+\]
+
+\(\ell_i\) (laggard score) is how many "expected moves" the residual is. ~0 = fully caught up; ≥1 = hasn't printed the cascade yet.
+
+\[
+C_i \;=\; \max\!\big(0,\; \min(95,\; \max(C^{\mathrm{tier}}, C^{\mathrm{lag}}) + 10 \cdot \mathbf{1}_{\mathrm{agree}}) - 0.5\, R_i\big)
+\]
+
+\(\mathbf{1}_{\mathrm{agree}}\) is 1 when the within-tier signal and the lag-gap signal point the same way (\(\mathrm{sign}(r_i - \bar{r}_k) = \mathrm{sign}(-g_i)\)).
+
+### 7. Entry, expected return, stop
+
+Let \(P\) be the live CoinGecko price.
+
+- **Entry:** \(0.98P\) on a long (limit on dip), \(1.02P\) on a short (limit on bounce).
+- **Expected return / exit** — 60% of the dominant dislocation, haircut by remaining risk budget:
+
+\[
+\pi_i \;=\; \max(d_i, |g_i|) \cdot 0.6 \cdot \frac{100 - R_i}{100}
+\]
+
+The `expectedReturn` field on the opportunity and the exit-target string are the **same** \(\pi_i\). They cannot disagree.
+
+- **Stop:** \(\max(3,\, 0.15\, R_i)\) percent.
+
+`historicalSuccessRate` in the payload is \( \max(30,\, 95 - 0.8 R_i) \). It is an inverse function of risk, **not** an empirical win rate.
+
+## Worked example
+
+Small-cap token, BTC/ETH day of \(L = +2.00\%\), token printed \(r = -0.50\%\), its tier averaged \(\bar{r}_k = +0.80\%\), universe averaged \(+1.00\%\), \(V/\mathrm{mcap} = 0.08\), \(n_k = 200\).
+
+\[
+\varphi(\mathrm{small}) \;=\; 0.94 \times 0.87 \times 0.72 \times 0.58 \;=\; 0.341513
+\]
+
+\[
+\mathbb{E}[r] \;=\; 2.00 \times 0.341513 \;=\; 0.6830\%
+\]
+
+\[
+g \;=\; 0.6830 - (-0.50) \;=\; +1.1830\% \quad \Rightarrow \quad \textbf{LONG}
+\]
+
+\[
+d \;=\; |-0.50 - 0.80| \;=\; 1.30
+\]
+
+\[
+R^{\mathrm{vol}}=55,\;
+R^{\mathrm{corr}}=6.5,\;
+R^{\mathrm{liq}}=34,\;
+R^{\mathrm{trend}}=4.5
+\quad\Rightarrow\quad R = 25 \;\Rightarrow\; \text{low, 5–7x}
+\]
+
+\[
+\pi \;=\; \max(1.30,\, 1.1830) \times 0.6 \times 0.75 \;=\; 0.5850\%
+\]
+
+\[
+\mathrm{stop} \;=\; \max(3,\, 0.15 \times 25) \;=\; 3.75\%
+\]
+
+Re-run this exact example with:
+
+```bash
+npm run verify-math
 ```
 
-Adjacent-tier correlations currently used (static, historically typical 24h values — see [Known limitations](#known-limitations)):
-
-```
-Mega → Large 0.94 → Large-Medium 0.87 → Small-Medium 0.72 → Small 0.58 → Micro 0.23
-```
-
-Every generated opportunity includes the full breakdown (`leaderMomentum`, `propagationFactor`, `expectedPropagatedMove`, `lagGap`, `laggardScore`) so a signal can be interrogated, not just taken.
+If any identity above drifts from `shared/propagation.ts`, CI fails.
 
 ## Setup
 
 ```bash
-git clone https://github.com/kailenvyas121/crypto-leverage-arbitrage.git
-cd crypto-leverage-arbitrage
+git clone https://github.com/kailenvyas121/CryptoMarketCapArb.git
+cd CryptoMarketCapArb
 npm install
+npm run verify-math
 npm run dev
 ```
 
@@ -100,52 +260,53 @@ CoinGecko /coins/markets
 In-memory store  storage.ts
         │
         ▼
-Lag-propagation engine  opportunityService.ts
-  BTC/ETH momentum → expected move by tier → lagGap →
-  risk score / leverage / entry / exit / stop
+shared/propagation.ts          ← source of truth for φ, g, π, R, leverage
+        │
+        ▼
+opportunityService.ts          triggers, explanations, trade plan
         │
         ├─ REST  /api/cryptocurrencies  /api/opportunities  /api/market/stats
-        └─ WebSocket  /ws  (live snapshot every few seconds)
+        └─ WebSocket  /ws
                 │
                 ▼
-React dashboard  client/src
-  Overview · Signals · Cascade charts · AI chat
+React dashboard  Signals tab (token, direction, lag gap, entry / exit / stop)
 ```
 
 ```
-client/                 React + TypeScript dashboard (Vite, Tailwind, shadcn/ui)
-server/
-  services/
-    cryptoService.ts          CoinGecko ingestion + market-cap tiering
-    opportunityService.ts     Lag-propagation + risk + trade-plan engine
-    tradingExpertService.ts   Optional Gemini assistant, rule-based fallback
-  storage.ts                  In-memory store (Postgres/Drizzle is scaffolded, not required)
-  routes.ts                   REST + WebSocket + startup/refresh loops
-shared/schema.ts              Shared types
+shared/propagation.ts     cascade math (CI-checked)
+shared/schema.ts          shared types
+server/services/
+  cryptoService.ts        CoinGecko + market-cap tiering
+  opportunityService.ts   scoring + trade-plan engine
+  tradingExpertService.ts optional Gemini assistant, rule-based fallback
+server/storage.ts         in-memory store (Postgres/Drizzle is scaffolded, not required)
+scripts/verify-math.ts    README identities vs production math
+client/                   React + TypeScript dashboard
 ```
 
-No database is required to run this. Prices and signals live in memory and refresh on a 2-minute interval. `shared/schema.ts` + `drizzle.config.ts` are there if you want durable history later.
+No database is required. Prices and signals live in memory and refresh on a 2-minute interval.
 
 ## Deploying
 
-This is a **single always-on Node process** (API + WebSocket + static frontend on one port). That fits Render, Railway, Fly.io, or a VPS — not classic serverless/edge functions.
+Single always-on Node process (API + WebSocket + static frontend on one port). Fits Render, Railway, Fly.io, or a VPS — not classic serverless.
 
 `render.yaml` is included. On [Render](https://render.com): New → Web Service → this repo. Build `npm install && npm run build`, start `npm run start`. No env vars required to go live.
 
 ## Known limitations
 
-- **Propagation uses 24h close-to-close returns, not tick/perp microstructure.** The original thesis is about delayed price discovery on perpetuals; the live engine approximates that with CoinGecko's 24h % change. Intraday lag (minutes, not a day) is not measured yet.
-- **Tier-to-tier correlations are a static table**, not a rolling empirically re-estimated matrix. They are directionally right (leaders lead, micro barely follows) but will be wrong in regime shifts (e.g. a memecoin-only melt-up).
-- **No exchange execution / no funding-rate input.** Output is a research signal (direction, risk, suggested leverage, levels), not an order. Binance/Bybit perp availability is assumed, not checked.
-- **CoinGecko free-tier rate limits.** Without `COINGECKO_API_KEY` the first fetch can be partial; the app falls back to a small in-memory demo universe and still runs the same engine.
-- **Confidence is a heuristic**, not a backtested hit rate. `historicalSuccessRate` in the analysis payload is an inverse function of risk, not an empirical win rate.
-- **AI chat is optional.** Without `GEMINI_API_KEY` you still get a rule-based market briefing; you do not get LLM-generated commentary.
+- **24h close-to-close, not tick/perp microstructure.** The original thesis is delayed price discovery on perpetuals; the live engine approximates that with CoinGecko's 24h % change. Intraday lag (minutes, not a day) is not measured yet.
+- **\(\rho_k\) is a static table**, not a rolling empirically re-estimated correlation matrix. Directionally right (leaders lead, micro barely follows) but wrong in regime shifts (e.g. a memecoin-only melt-up).
+- **\(\sigma(\cdot)\) is not a hypothesis test.** It is a capped, sample-size-scaled magnitude. Do not treat confidence as a calibrated probability.
+- **\(\pi_i\) assumes 60% of the residual mean-reverts.** That 0.6 is a modeling choice, not a backtested recovery rate.
+- **No exchange execution / no funding-rate input.** Output is a research signal. Binance/Bybit perp availability is assumed, not checked.
+- **`historicalSuccessRate` is not a win rate.** It is \(95 - 0.8R_i\).
+- **CoinGecko free-tier rate limits.** Without `COINGECKO_API_KEY` the first fetch can be partial; the app falls back to a small in-memory universe and still runs the same engine.
 
 ## Roadmap
 
-- [ ] Rolling, empirically re-estimated correlation matrix instead of the static cascade table.
+- [ ] Rolling, empirically re-estimated \(\rho_k\) instead of the static cascade table.
 - [ ] Intraday (1h / 4h) leader-lag measurement so the signal matches perp holding periods.
-- [ ] Persist signal history to Postgres and report hit rate / expectancy over time.
+- [ ] Persist signal history and report hit rate / expectancy of \(\pi_i\) over time.
 - [ ] AI interpretability layer: interrogate a live signal's assumptions, drivers, and whether the current regime still fits the lag thesis.
 - [ ] Filter universe to tokens that actually have a liquid USDT-M perp.
 

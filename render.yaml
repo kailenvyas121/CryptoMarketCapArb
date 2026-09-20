@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: crypto-leverage-arbitrage-algorithm
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Optional - raises CoinGecko rate limits. Leave unset to use the free public tier.
+      - key: COINGECKO_API_KEY
+        sync: false
+      # Optional - enables the AI "Chips" trading assistant. Falls back to a
+      # rule-based analyst automatically if unset.
+      - key: GEMINI_API_KEY
+        sync: false

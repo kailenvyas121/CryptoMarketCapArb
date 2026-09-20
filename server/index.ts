@@ -56,15 +56,20 @@ app.use((req, res, next) => {
     serveStatic(app);
   }
 
-  // ALWAYS serve the app on port 5000
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = 5000;
-  server.listen({
+  // Serves both the API and the client on a single port.
+  // Hosting platforms (Render, Railway, Fly.io, etc.) inject PORT via env var;
+  // falls back to 5000 for local development.
+  const port = Number(process.env.PORT) || 5000;
+  const listenOptions: { port: number; host: string; reusePort?: boolean } = {
     port,
     host: "0.0.0.0",
-    reusePort: true,
-  }, () => {
+  };
+  // SO_REUSEPORT isn't supported on all platforms (e.g. macOS can throw
+  // ENOTSUP), so only enable it on Linux where it's commonly needed.
+  if (process.platform === "linux") {
+    listenOptions.reusePort = true;
+  }
+  server.listen(listenOptions, () => {
     log(`serving on port ${port}`);
   });
 })();

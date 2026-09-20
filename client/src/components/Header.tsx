@@ -40,8 +40,8 @@ export default function Header({ isConnected, lastUpdate, onRefresh }: HeaderPro
           <div className="flex items-center space-x-2">
             <TrendingUp className="text-cyan-400 h-8 w-8" />
             <div>
-              <h1 className="text-xl font-bold text-white">CryptoLeverage Pro</h1>
-              <p className="text-xs text-slate-400">by KailChips</p>
+              <h1 className="text-xl font-bold text-white">Crypto Leverage Arbitrage</h1>
+              <p className="text-xs text-slate-400">BTC/ETH lag-propagation signals</p>
             </div>
           </div>
           

@@ -307,6 +307,18 @@ export default function EnhancedSignalsPage({ marketData }: EnhancedSignalsPageP
                       <p className="text-slate-400">Risk Level</p>
                       <p className="text-slate-200 font-mono">{riskPercentage.toFixed(1)}%</p>
                     </div>
+                    {typeof opportunity.analysis?.lagGap === 'number' && (
+                      <div>
+                        <p className="text-slate-400">Lag gap vs BTC/ETH</p>
+                        <p className="text-slate-200 font-mono">{opportunity.analysis.lagGap.toFixed(2)}%</p>
+                      </div>
+                    )}
+                    {typeof opportunity.analysis?.leaderMomentum === 'number' && (
+                      <div>
+                        <p className="text-slate-400">Leader momentum</p>
+                        <p className="text-slate-200 font-mono">{opportunity.analysis.leaderMomentum.toFixed(2)}%</p>
+                      </div>
+                    )}
                   </div>
                   
                   <div className="pt-2 border-t border-slate-700">
@@ -316,6 +328,13 @@ export default function EnhancedSignalsPage({ marketData }: EnhancedSignalsPageP
                         {opportunity.leverageRecommendation}
                       </Badge>
                     </div>
+                    {opportunity.analysis?.entryPoint && (
+                      <div className="mt-2 grid grid-cols-1 gap-1 text-xs text-slate-400">
+                        <div><span className="text-slate-500">Entry:</span> {opportunity.analysis.entryPoint}</div>
+                        <div><span className="text-slate-500">Exit:</span> {opportunity.analysis.exitPoint}</div>
+                        <div><span className="text-slate-500">Stop:</span> {opportunity.analysis.stopLoss}</div>
+                      </div>
+                    )}
                   </div>
                   
                   {opportunity.analysis?.explanation && (

@@ -862,9 +862,18 @@ export default function MainContent({ activeTab, onTabChange, marketData, isConn
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {marketData?.opportunities?.map((opportunity: any) => (
-                  <OpportunityCard key={opportunity.id} opportunity={opportunity} />
-                )) || (
+                {(marketData?.opportunities || [])
+                  .slice()
+                  .sort((a: any, b: any) => parseFloat(b.confidence) - parseFloat(a.confidence))
+                  .slice(0, 12)
+                  .map((opportunity: any) => (
+                  <OpportunityCard
+                    key={opportunity.id}
+                    opportunity={opportunity}
+                    cryptocurrencies={marketData?.cryptocurrencies || []}
+                  />
+                ))}
+                {(!marketData?.opportunities || marketData.opportunities.length === 0) && (
                   <div className="col-span-2 flex items-center justify-center p-8 text-slate-400">
                     {isConnected ? "No opportunities available" : "Connect to see live opportunities"}
                   </div>

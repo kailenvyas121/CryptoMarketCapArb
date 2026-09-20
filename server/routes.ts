@@ -143,17 +143,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  async function runLagAnalysis() {
+    const cryptocurrencies = await storage.getAllCryptocurrencies();
+    const opportunities = await opportunityService.analyzeOpportunities(cryptocurrencies);
+    await storage.replaceActiveOpportunities(opportunities);
+    return opportunities.length;
+  }
+
   app.post('/api/opportunities/analyze', async (req, res) => {
     try {
-      const cryptocurrencies = await storage.getAllCryptocurrencies();
-      const opportunities = await opportunityService.analyzeOpportunities(cryptocurrencies);
-      
-      // Store new opportunities
-      for (const opportunity of opportunities) {
-        await storage.createTradingOpportunity(opportunity);
-      }
-      
-      res.json({ message: 'Analysis complete', count: opportunities.length });
+      const count = await runLagAnalysis();
+      res.json({ message: 'Analysis complete', count });
     } catch (error) {
       res.status(500).json({ error: 'Failed to analyze opportunities' });
     }
@@ -254,20 +254,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
-      // Analyze new opportunities
-      const cryptocurrencies = await storage.getAllCryptocurrencies();
-      const opportunities = await opportunityService.analyzeOpportunities(cryptocurrencies);
-      
-      // Store new opportunities
-      let opportunityCount = 0;
-      for (const opportunity of opportunities) {
-        try {
-          await storage.createTradingOpportunity(opportunity);
-          opportunityCount++;
-        } catch (error) {
-          console.error('Error creating opportunity:', error);
-        }
-      }
+      const opportunityCount = await runLagAnalysis();
       
       res.json({ 
         message: 'Market data refreshed successfully',
@@ -383,9 +370,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       console.log('Initial market data refresh completed');
+
+      const signalCount = await runLagAnalysis();
+      console.log(`Lag-propagation analysis complete: ${signalCount} active signals`);
     } catch (error) {
       console.error('Initial refresh error:', error);
       console.log('Continuing with demo data...');
+      try {
+        const signalCount = await runLagAnalysis();
+        console.log(`Lag-propagation analysis (fallback): ${signalCount} active signals`);
+      } catch (analysisError) {
+        console.error('Fallback analysis error:', analysisError);
+      }
     }
   })();
 
@@ -399,8 +395,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const cryptocurrency = cryptoService.transformToInsertCryptocurrency(coinData);
         await storage.upsertCryptocurrency(cryptocurrency);
       }
-      
-      console.log('Auto-refresh completed');
+
+      const signalCount = await runLagAnalysis();
+      console.log(`Auto-refresh completed (${signalCount} signals)`);
     } catch (error) {
       console.error('Auto-refresh error:', error);
     }

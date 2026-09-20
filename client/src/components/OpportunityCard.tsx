@@ -1,12 +1,19 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { TrendingUp, TrendingDown, AlertTriangle, Target } from "lucide-react";
+import { TrendingUp, TrendingDown } from "lucide-react";
 
 interface OpportunityCardProps {
   opportunity: any;
+  cryptocurrencies?: any[];
 }
 
-export default function OpportunityCard({ opportunity }: OpportunityCardProps) {
+export default function OpportunityCard({ opportunity, cryptocurrencies = [] }: OpportunityCardProps) {
+  const token = cryptocurrencies.find((c: any) => c.id === opportunity.cryptocurrencyId);
+  const symbol = token?.symbol || `ID ${opportunity.cryptocurrencyId}`;
+  const analysis = opportunity.analysis || {};
+  const lagGap = typeof analysis.lagGap === 'number' ? analysis.lagGap : null;
+  const leaderMomentum = typeof analysis.leaderMomentum === 'number' ? analysis.leaderMomentum : null;
+
   const getRiskColor = (riskLevel: string) => {
     switch (riskLevel) {
       case 'low': return 'bg-green-900/20 text-green-400 border-green-400/20';
@@ -29,16 +36,14 @@ export default function OpportunityCard({ opportunity }: OpportunityCardProps) {
     return type === 'long' ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />;
   };
 
-  const analysis = opportunity.analysis || {};
-
   return (
     <Card className="bg-slate-900/80 backdrop-blur-sm border-slate-700 hover:border-cyan-400/50 transition-all duration-200 hover:shadow-lg hover:shadow-cyan-400/10">
       <CardHeader>
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             {getRiskIcon(opportunity.riskLevel)}
-            <CardTitle className="text-white capitalize">
-              {opportunity.riskLevel} Risk Opportunity
+            <CardTitle className="text-white">
+              {symbol} · {opportunity.riskLevel} risk
             </CardTitle>
           </div>
           <div className="text-right">
@@ -60,7 +65,7 @@ export default function OpportunityCard({ opportunity }: OpportunityCardProps) {
               <div className="flex items-center space-x-2">
                 {getOpportunityIcon(opportunity.opportunityType)}
                 <span className="font-medium text-white">
-                  {opportunity.cryptocurrencyId} ({opportunity.opportunityType.toUpperCase()})
+                  {symbol} ({opportunity.opportunityType.toUpperCase()} perp)
                 </span>
               </div>
               <Badge variant="secondary" className={getRiskColor(opportunity.riskLevel)}>
@@ -69,6 +74,21 @@ export default function OpportunityCard({ opportunity }: OpportunityCardProps) {
             </div>
             
             <div className="space-y-3 text-sm text-slate-300">
+              {(lagGap !== null || leaderMomentum !== null) && (
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  {leaderMomentum !== null && (
+                    <div>
+                      <strong className="text-white">BTC/ETH momentum:</strong> {leaderMomentum.toFixed(2)}%
+                    </div>
+                  )}
+                  {lagGap !== null && (
+                    <div>
+                      <strong className="text-white">Lag gap:</strong> {lagGap.toFixed(2)}%
+                    </div>
+                  )}
+                </div>
+              )}
+
               {analysis.explanation && (
                 <div>
                   <strong className="text-white">Evidence:</strong> {analysis.explanation}

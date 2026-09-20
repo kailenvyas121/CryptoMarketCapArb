@@ -14,7 +14,8 @@ import {
   type CorrelationData,
   type PriceHistory,
   type UserFavorite,
-  type InsertUserFavorite
+  type InsertUserFavorite,
+  type FavoriteOpportunity,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -33,6 +34,7 @@ export interface IStorage {
   getActiveOpportunities(): Promise<TradingOpportunity[]>;
   createTradingOpportunity(opportunity: InsertTradingOpportunity): Promise<TradingOpportunity>;
   deactivateOpportunity(id: number): Promise<void>;
+  replaceActiveOpportunities(opportunities: InsertTradingOpportunity[]): Promise<TradingOpportunity[]>;
   
   // Correlation methods
   getLatestCorrelations(): Promise<CorrelationData[]>;
@@ -175,134 +177,9 @@ export class MemStorage implements IStorage {
       });
     });
 
-    // Generate demo trading opportunities
-    const opportunities = [
-      {
-        cryptocurrencyId: 4, // SOL
-        opportunityType: 'LONG',
-        riskLevel: 'MEDIUM',
-        riskPercentage: '25',
-        leverageRecommendation: '3x',
-        expectedReturn: '18.5',
-        confidence: '87',
-        analysis: {
-          explanation: 'SOL is outperforming its Large Cap tier by +1.7%. While BTC and ETH show positive momentum, SOL demonstrates stronger fundamentals and is likely to continue its upward trajectory.',
-          strategy: 'Enter long position on SOL with 3x leverage. Set tight stop-loss due to volatility.',
-          entryPoint: '$105 - $108',
-          exitPoint: '$125 - $130',
-          stopLoss: '$98',
-          volatilityRisk: 35,
-          correlationRisk: 15,
-          volumeRisk: 20,
-          trendRisk: 10,
-          statisticalSignificance: 85,
-          historicalSuccessRate: 72
-        },
-        expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000), // 2 hours
-      },
-      {
-        cryptocurrencyId: 20, // FTM
-        opportunityType: 'LONG',
-        riskLevel: 'HIGH',
-        riskPercentage: '45',
-        leverageRecommendation: '5x',
-        expectedReturn: '32.8',
-        confidence: '62',
-        analysis: {
-          explanation: 'FTM is significantly lagging its Small Medium tier (-3.2% vs +0.8% tier average). When small-medium caps recover, FTM likely to catch up aggressively.',
-          strategy: 'Contrarian play - buy the lag. FTM tends to overcorrect when tier sentiment improves.',
-          entryPoint: '$0.44 - $0.46',
-          exitPoint: '$0.58 - $0.65',
-          stopLoss: '$0.41',
-          volatilityRisk: 65,
-          correlationRisk: 25,
-          volumeRisk: 45,
-          trendRisk: 35,
-          statisticalSignificance: 68,
-          historicalSuccessRate: 58
-        },
-        expiresAt: new Date(Date.now() + 4 * 60 * 60 * 1000), // 4 hours
-      },
-      {
-        cryptocurrencyId: 32, // PEPE
-        opportunityType: 'SHORT',
-        riskLevel: 'HIGH',
-        riskPercentage: '78',
-        leverageRecommendation: '2x',
-        expectedReturn: '45.2',
-        confidence: '34',
-        analysis: {
-          explanation: 'PEPE showing extreme volatility (+15.7%) with no correlation to market fundamentals. Meme coin pump appears unsustainable without major tier support.',
-          strategy: 'Short the meme pump. Wait for momentum to fade then short with small position size.',
-          entryPoint: '$0.00000120 - $0.00000130',
-          exitPoint: '$0.00000085 - $0.00000095',
-          stopLoss: '$0.00000145',
-          volatilityRisk: 95,
-          correlationRisk: 85,
-          volumeRisk: 70,
-          trendRisk: 60,
-          statisticalSignificance: 35,
-          historicalSuccessRate: 28
-        },
-        expiresAt: new Date(Date.now() + 1 * 60 * 60 * 1000), // 1 hour
-      },
-      {
-        cryptocurrencyId: 24, // SKL
-        opportunityType: 'LONG',
-        riskLevel: 'MEDIUM',
-        riskPercentage: '38',
-        leverageRecommendation: '4x',
-        expectedReturn: '28.4',
-        confidence: '74',
-        analysis: {
-          explanation: 'SKL outperforming Small Cap tier significantly (+4.2% vs +2.1% average). Small caps showing strength, SKL has momentum and volume support.',
-          strategy: 'Momentum play on small cap leader. Strong volume confirms the move.',
-          entryPoint: '$0.047 - $0.049',
-          exitPoint: '$0.061 - $0.067',
-          stopLoss: '$0.043',
-          volatilityRisk: 55,
-          correlationRisk: 30,
-          volumeRisk: 25,
-          trendRisk: 15,
-          statisticalSignificance: 78,
-          historicalSuccessRate: 65
-        },
-        expiresAt: new Date(Date.now() + 3 * 60 * 60 * 1000), // 3 hours
-      },
-      {
-        cryptocurrencyId: 11, // UNI
-        opportunityType: 'LONG',
-        riskLevel: 'LOW',
-        riskPercentage: '15',
-        leverageRecommendation: '2x',
-        expectedReturn: '12.3',
-        confidence: '91',
-        analysis: {
-          explanation: 'UNI lagging Large Medium tier (-0.9% vs +1.5% average). Strong fundamentals, DeFi sector recovery expected to lift UNI back to tier average.',
-          strategy: 'Value play on quality DeFi blue chip. Low risk entry with high probability of mean reversion.',
-          entryPoint: '$6.75 - $6.85',
-          exitPoint: '$7.40 - $7.80',
-          stopLoss: '$6.45',
-          volatilityRisk: 25,
-          correlationRisk: 10,
-          volumeRisk: 15,
-          trendRisk: 8,
-          statisticalSignificance: 92,
-          historicalSuccessRate: 84
-        },
-        expiresAt: new Date(Date.now() + 6 * 60 * 60 * 1000), // 6 hours
-      }
-    ];
-
-    opportunities.forEach(opp => {
-      const id = this.currentOpportunityId++;
-      this.tradingOpportunities.set(id, {
-        ...opp,
-        id,
-        createdAt: new Date(),
-        isActive: true,
-      });
-    });
+    // Live lag-propagation signals are generated on startup from CoinGecko
+    // data (see registerRoutes). Demo coins/correlations above are only a
+    // fallback if the first fetch fails.
   }
 
   // User methods
@@ -401,6 +278,17 @@ export class MemStorage implements IStorage {
       opportunity.isActive = false;
       this.tradingOpportunities.set(id, opportunity);
     }
+  }
+
+  async replaceActiveOpportunities(opportunities: InsertTradingOpportunity[]): Promise<TradingOpportunity[]> {
+    for (const opportunity of this.tradingOpportunities.values()) {
+      opportunity.isActive = false;
+    }
+    const created: TradingOpportunity[] = [];
+    for (const opportunity of opportunities) {
+      created.push(await this.createTradingOpportunity(opportunity));
+    }
+    return created;
   }
 
   // Correlation methods

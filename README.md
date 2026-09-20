@@ -1,5 +1,6 @@
 # Crypto Leverage Arbitrage Algorithm
 
+[![CI](https://github.com/kailenvyas121/crypto-leverage-arbitrage/actions/workflows/ci.yml/badge.svg)](https://github.com/kailenvyas121/crypto-leverage-arbitrage/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Live dashboard that segments the crypto market into six market-cap tiers, models **lagged price propagation from BTC/ETH into lower tiers**, and scores **long/short perpetual-futures setups** with a risk score plus explicit entry, exit, and stop-loss levels.
